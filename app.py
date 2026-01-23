@@ -139,5 +139,111 @@ Be specific about the item name and accurate with the bin classification."""
             "details": str(e)
         }), 500
 
+@app.route('/check-bag', methods=['POST'])
+def check_bag():
+    if 'image' not in request.files:
+        return jsonify({"error": "No image provided"}), 400
+    
+    file = request.files['image']
+    if file.filename == '':
+        return jsonify({"error": "No image selected"}), 400
+    
+    bag_type = request.form.get('bag_type', 'unknown')
+    
+    image_data = file.read()
+    base64_image = base64.b64encode(image_data).decode('utf-8')
+    
+    mime_type = file.content_type or 'image/jpeg'
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"""You are a waste sorting quality inspector. Analyze this image of a filled garbage bag and evaluate how well it is sorted.
+
+The user claims this is a {bag_type} bag. Evaluate if the contents match what should go in that bag type.
+
+Bag color meanings (generic recycling guidelines):
+- Green bag: Compost/organic waste (food scraps, yard waste, organic matter)
+- Blue bag: Recycling (plastics, metals, glass, paper, cardboard)
+- White/Black bag: Landfill/general waste (non-recyclable items)
+
+Respond with ONLY valid JSON in this exact format:
+{{
+    "score": integer from 0-100 representing sorting quality,
+    "grade": "A", "B", "C", "D", or "F" based on score,
+    "is_properly_sorted": true or false,
+    "bag_type_correct": true or false (does content match claimed bag type),
+    "items_detected": ["list", "of", "visible", "items"],
+    "contamination_issues": ["list of items that don't belong in this bag type"],
+    "explanation": "Brief explanation of why the bag received this score",
+    "suggestions": ["actionable suggestion 1", "actionable suggestion 2"],
+    "confidence": "high", "medium", or "low"
+}}
+
+Scoring guide:
+- 90-100 (A): Perfectly sorted, no contamination
+- 80-89 (B): Well sorted, minor issues
+- 70-79 (C): Acceptable, some contamination
+- 60-69 (D): Poor sorting, significant contamination
+- 0-59 (F): Failed, major contamination or wrong bag type
+
+Be honest about limitations - if the image is unclear or you cannot identify items with certainty, reflect that in confidence level and explanation."""
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Evaluate this {bag_type} garbage bag. Is it properly sorted? What items can you see?"
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=600
+        )
+        
+        result_content = response.choices[0].message.content
+        if result_content is None:
+            raise ValueError("No response from AI model")
+        result_text = result_content.strip()
+        
+        if result_text.startswith("```"):
+            result_text = result_text.split("```")[1]
+            if result_text.startswith("json"):
+                result_text = result_text[4:]
+        result_text = result_text.strip()
+        
+        import json
+        ai_result = json.loads(result_text)
+        
+        return jsonify({
+            "score": ai_result.get("score", 50),
+            "grade": ai_result.get("grade", "C"),
+            "is_properly_sorted": ai_result.get("is_properly_sorted", False),
+            "bag_type_correct": ai_result.get("bag_type_correct", True),
+            "items_detected": ai_result.get("items_detected", []),
+            "contamination_issues": ai_result.get("contamination_issues", []),
+            "explanation": ai_result.get("explanation", "Unable to determine sorting quality."),
+            "suggestions": ai_result.get("suggestions", ["Please ensure items match the bag type."]),
+            "confidence": ai_result.get("confidence", "low"),
+            "bag_type": bag_type
+        })
+        
+    except Exception as e:
+        print(f"Error checking bag: {e}")
+        return jsonify({
+            "error": "Failed to analyze bag. Please try again.",
+            "details": str(e)
+        }), 500
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

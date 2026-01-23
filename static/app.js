@@ -9,7 +9,21 @@ const resultsSection = document.getElementById('resultsSection');
 const newScanBtn = document.getElementById('newScanBtn');
 const resetBtn = document.getElementById('resetBtn');
 
+const bagDropZone = document.getElementById('bagDropZone');
+const bagFileInput = document.getElementById('bagFileInput');
+const bagPreviewContainer = document.getElementById('bagPreviewContainer');
+const bagImagePreview = document.getElementById('bagImagePreview');
+const bagRemoveBtn = document.getElementById('bagRemoveBtn');
+const checkBagBtn = document.getElementById('checkBagBtn');
+const bagLoading = document.getElementById('bagLoading');
+const bagResultsSection = document.getElementById('bagResultsSection');
+const newBagCheckBtn = document.getElementById('newBagCheckBtn');
+const bagCheckerSection = document.getElementById('bagCheckerSection');
+const uploadSection = document.querySelector('.upload-section');
+
 let selectedFile = null;
+let selectedBagFile = null;
+let selectedBagType = 'green';
 
 const BIN_CONFIG = {
     recycling: {
@@ -215,5 +229,213 @@ newScanBtn.addEventListener('click', () => {
 });
 
 resetBtn.addEventListener('click', resetStats);
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        
+        const tab = btn.dataset.tab;
+        
+        if (tab === 'item-scanner') {
+            uploadSection.style.display = 'block';
+            resultsSection.style.display = resultsSection.dataset.wasVisible === 'true' ? 'block' : 'none';
+            bagCheckerSection.style.display = 'none';
+            bagResultsSection.style.display = 'none';
+            document.getElementById('itemScannerSteps').style.display = 'flex';
+            document.getElementById('bagCheckerSteps').style.display = 'none';
+        } else {
+            resultsSection.dataset.wasVisible = resultsSection.style.display !== 'none';
+            uploadSection.style.display = 'none';
+            resultsSection.style.display = 'none';
+            bagCheckerSection.style.display = 'block';
+            bagResultsSection.style.display = bagResultsSection.dataset.wasVisible === 'true' ? 'block' : 'none';
+            document.getElementById('itemScannerSteps').style.display = 'none';
+            document.getElementById('bagCheckerSteps').style.display = 'flex';
+        }
+    });
+});
+
+document.querySelectorAll('.bag-option').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.bag-option').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        selectedBagType = btn.dataset.bag;
+    });
+});
+
+bagDropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    bagDropZone.classList.add('dragover');
+});
+
+bagDropZone.addEventListener('dragleave', () => {
+    bagDropZone.classList.remove('dragover');
+});
+
+bagDropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    bagDropZone.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0 && files[0].type.startsWith('image/')) {
+        handleBagFile(files[0]);
+    }
+});
+
+bagDropZone.addEventListener('click', (e) => {
+    if (e.target !== bagRemoveBtn && !bagRemoveBtn.contains(e.target)) {
+        if (!selectedBagFile) {
+            bagFileInput.click();
+        }
+    }
+});
+
+bagFileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        handleBagFile(e.target.files[0]);
+    }
+});
+
+function handleBagFile(file) {
+    selectedBagFile = file;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        bagImagePreview.src = e.target.result;
+        document.getElementById('bagUploadContent').style.display = 'none';
+        bagPreviewContainer.style.display = 'block';
+        checkBagBtn.disabled = false;
+    };
+    reader.readAsDataURL(file);
+}
+
+bagRemoveBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    clearBagPreview();
+});
+
+function clearBagPreview() {
+    selectedBagFile = null;
+    bagImagePreview.src = '';
+    bagPreviewContainer.style.display = 'none';
+    document.getElementById('bagUploadContent').style.display = 'flex';
+    checkBagBtn.disabled = true;
+    bagFileInput.value = '';
+}
+
+checkBagBtn.addEventListener('click', checkBagQuality);
+
+async function checkBagQuality() {
+    if (!selectedBagFile) return;
+    
+    bagLoading.classList.add('active');
+    checkBagBtn.style.display = 'none';
+    bagResultsSection.style.display = 'none';
+    
+    const formData = new FormData();
+    formData.append('image', selectedBagFile);
+    formData.append('bag_type', selectedBagType);
+    
+    try {
+        const response = await fetch('/check-bag', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        
+        displayBagResults(data);
+        
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to analyze bag: ' + error.message);
+    } finally {
+        bagLoading.classList.remove('active');
+        checkBagBtn.style.display = 'block';
+    }
+}
+
+function displayBagResults(data) {
+    const scoreCard = document.getElementById('scoreCard');
+    scoreCard.className = 'score-card grade-' + data.grade.toLowerCase();
+    
+    document.getElementById('scoreValue').textContent = data.score;
+    document.getElementById('gradeBadge').textContent = data.grade;
+    
+    const verdict = document.getElementById('verdict');
+    const verdictIcon = document.getElementById('verdictIcon');
+    const verdictText = document.getElementById('verdictText');
+    
+    if (data.is_properly_sorted) {
+        verdict.className = 'verdict pass';
+        verdictIcon.innerHTML = '&#10004;';
+        verdictText.textContent = 'Properly Sorted';
+    } else {
+        verdict.className = 'verdict fail';
+        verdictIcon.innerHTML = '&#10008;';
+        verdictText.textContent = 'Needs Improvement';
+    }
+    
+    const itemsContainer = document.getElementById('itemsDetected');
+    itemsContainer.innerHTML = '';
+    (data.items_detected || []).forEach(item => {
+        const tag = document.createElement('span');
+        tag.className = 'item-tag';
+        tag.textContent = item;
+        itemsContainer.appendChild(tag);
+    });
+    
+    const issuesCard = document.getElementById('issuesCard');
+    const issuesList = document.getElementById('issuesList');
+    issuesList.innerHTML = '';
+    
+    if (data.contamination_issues && data.contamination_issues.length > 0) {
+        issuesCard.style.display = 'block';
+        data.contamination_issues.forEach(issue => {
+            const li = document.createElement('li');
+            li.textContent = issue;
+            issuesList.appendChild(li);
+        });
+    } else {
+        issuesCard.style.display = 'none';
+    }
+    
+    document.getElementById('explanationText').textContent = data.explanation;
+    
+    const suggestionsList = document.getElementById('suggestionsList');
+    suggestionsList.innerHTML = '';
+    (data.suggestions || []).forEach(suggestion => {
+        const li = document.createElement('li');
+        li.textContent = suggestion;
+        suggestionsList.appendChild(li);
+    });
+    
+    const confidenceNotice = document.getElementById('confidenceNotice');
+    const confidenceText = document.getElementById('confidenceText');
+    
+    if (data.confidence === 'low') {
+        confidenceNotice.style.display = 'flex';
+        confidenceText.textContent = 'Low Confidence - Image may be unclear or items hard to identify';
+    } else if (data.confidence === 'medium') {
+        confidenceNotice.style.display = 'flex';
+        confidenceText.textContent = 'Medium Confidence - Some items may not be clearly visible';
+    } else {
+        confidenceNotice.style.display = 'none';
+    }
+    
+    bagResultsSection.style.display = 'block';
+    bagResultsSection.dataset.wasVisible = 'true';
+    bagResultsSection.scrollIntoView({ behavior: 'smooth' });
+}
+
+newBagCheckBtn.addEventListener('click', () => {
+    clearBagPreview();
+    bagResultsSection.style.display = 'none';
+    bagResultsSection.dataset.wasVisible = 'false';
+    bagCheckerSection.scrollIntoView({ behavior: 'smooth' });
+});
 
 initStats();
