@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EcoSort - Waste Sorting Assistant</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <span class="leaf-icon">&#127793;</span>
+                <h1>EcoSort</h1>
+            </div>
+            <p class="tagline">Your AI-Powered Waste Sorting Assistant</p>
+        </header>
+
+        <section class="intro">
+            <h2>How It Works</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <p>Upload a photo of your waste item</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <p>Our AI identifies the item</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <p>Get the right bin recommendation</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="upload-section">
+            <h2>Upload Your Item</h2>
+            <div class="upload-area" id="dropZone">
+                <div class="upload-content">
+                    <div class="upload-icon">&#128247;</div>
+                    <p>Drag & drop an image here</p>
+                    <p class="or-text">or</p>
+                    <label for="fileInput" class="file-label">Choose File</label>
+                    <input type="file" id="fileInput" accept="image/*" hidden>
+                </div>
+                <div class="preview-container" id="previewContainer" style="display: none;">
+                    <img id="imagePreview" alt="Preview">
+                    <button class="remove-btn" id="removeBtn">&#10005;</button>
+                </div>
+            </div>
+            <button class="classify-btn" id="classifyBtn" disabled>Classify Item</button>
+            <div class="loading" id="loading">
+                <div class="spinner"></div>
+                <p>Analyzing your item...</p>
+            </div>
+        </section>
+
+        <section class="results-section" id="resultsSection" style="display: none;">
+            <h2>Classification Result</h2>
+            <div class="result-card" id="resultCard">
+                <div class="bin-icon" id="binIcon"></div>
+                <h3 id="itemName">Plastic Bottle</h3>
+                <div class="bin-recommendation" id="binRecommendation">
+                    <span class="bin-label">Place in:</span>
+                    <span class="bin-name" id="binName">Recycling</span>
+                </div>
+                <div class="confidence" id="confidenceLabel">Confidence: High</div>
+            </div>
+
+            <div class="sustainability-card">
+                <h3>Your Environmental Impact</h3>
+                <div class="impact-stats">
+                    <div class="stat">
+                        <div class="stat-icon">&#9851;</div>
+                        <div class="stat-value" id="wasteSaved">0g</div>
+                        <div class="stat-label">Waste Diverted</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-icon">&#127811;</div>
+                        <div class="stat-value" id="co2Saved">0g</div>
+                        <div class="stat-label">CO2 Saved</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-icon">&#128176;</div>
+                        <div class="stat-value" id="moneySaved">$0.00</div>
+                        <div class="stat-label">Money Saved</div>
+                    </div>
+                </div>
+            </div>
+
+            <button class="new-scan-btn" id="newScanBtn">Scan Another Item</button>
+        </section>
+
+        <section class="total-impact-section">
+            <h2>Your Total Impact</h2>
+            <div class="total-stats">
+                <div class="total-stat">
+                    <div class="total-value" id="totalWaste">0</div>
+                    <div class="total-label">Items Sorted</div>
+                </div>
+                <div class="total-stat">
+                    <div class="total-value" id="totalWasteDiverted">0g</div>
+                    <div class="total-label">Total Waste Diverted</div>
+                </div>
+                <div class="total-stat">
+                    <div class="total-value" id="totalCo2">0g</div>
+                    <div class="total-label">Total CO2 Saved</div>
+                </div>
+                <div class="total-stat">
+                    <div class="total-value" id="totalMoney">$0.00</div>
+                    <div class="total-label">Total Savings</div>
+                </div>
+            </div>
+            <button class="reset-btn" id="resetBtn">Reset Stats</button>
+        </section>
+
+        <section class="bin-guide">
+            <h2>Bin Guide</h2>
+            <div class="bins">
+                <div class="bin recycling">
+                    <div class="bin-guide-icon">&#9851;</div>
+                    <h4>Recycling</h4>
+                    <p>Plastics, metals, glass, paper, cardboard</p>
+                </div>
+                <div class="bin compost">
+                    <div class="bin-guide-icon">&#127793;</div>
+                    <h4>Compost</h4>
+                    <p>Food scraps, yard waste, organic matter</p>
+                </div>
+                <div class="bin landfill">
+                    <div class="bin-guide-icon">&#128465;</div>
+                    <h4>Landfill</h4>
+                    <p>Non-recyclable items, mixed materials</p>
+                </div>
+                <div class="bin e-waste">
+                    <div class="bin-guide-icon">&#128268;</div>
+                    <h4>E-Waste</h4>
+                    <p>Electronics, batteries, cables</p>
+                </div>
+            </div>
+        </section>
+
+        <footer>
+            <p>Made with &#127793; for a greener planet</p>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
