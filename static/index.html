@@ -4,9 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>EcoSort - Waste Sorting Assistant</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
+    <canvas id="bgCanvas" aria-hidden="true"></canvas>
     <div class="access-bar">
         <button class="access-btn user-access" id="userAccessBtn">User Access</button>
         <button class="access-btn mgmt-access" id="mgmtAccessBtn">Management Access</button>
@@ -174,8 +176,8 @@
                         <div class="upload-icon">&#128247;</div>
                         <p>Drag & drop an image here</p>
                         <p class="or-text">or</p>
-                        <label for="fileInput" class="file-label">Choose File</label>
-                        <input type="file" id="fileInput" accept="image/*" hidden>
+                        <label for="fileInput" class="file-label">Add Photo</label>
+                        <input type="file" id="fileInput" accept="image/*" capture="environment" hidden>
                     </div>
                     <div class="preview-container" id="previewContainer" style="display: none;">
                         <img id="imagePreview" alt="Preview">
@@ -242,7 +244,7 @@
                         </button>
                         <button class="bag-option" data-bag="white">
                             <span class="bag-color-dot white"></span>
-                            White (Landfill)
+                            White (Waste)
                         </button>
                     </div>
                 </div>
@@ -252,8 +254,8 @@
                         <div class="upload-icon">&#128188;</div>
                         <p>Drag & drop a bag photo here</p>
                         <p class="or-text">or</p>
-                        <label for="bagFileInput" class="file-label">Choose File</label>
-                        <input type="file" id="bagFileInput" accept="image/*" hidden>
+                        <label for="bagFileInput" class="file-label">Add Photo</label>
+                        <input type="file" id="bagFileInput" accept="image/*" capture="environment" hidden>
                     </div>
                     <div class="preview-container" id="bagPreviewContainer" style="display: none;">
                         <img id="bagImagePreview" alt="Bag Preview">
@@ -331,7 +333,7 @@
                         </button>
                         <button class="bag-option" data-bag="white">
                             <span class="bag-color-dot white"></span>
-                            White (Landfill)
+                            White (Waste)
                         </button>
                     </div>
                 </div>
@@ -341,8 +343,8 @@
                         <div class="upload-icon">&#128230;</div>
                         <p>Upload your bag photo for submission</p>
                         <p class="or-text">or</p>
-                        <label for="submitFileInput" class="file-label">Choose File</label>
-                        <input type="file" id="submitFileInput" accept="image/*" hidden>
+                        <label for="submitFileInput" class="file-label">Add Photo</label>
+                        <input type="file" id="submitFileInput" accept="image/*" capture="environment" hidden>
                     </div>
                     <div class="preview-container" id="submitPreviewContainer" style="display: none;">
                         <img id="submitImagePreview" alt="Bag Preview">
@@ -407,7 +409,7 @@
                     </div>
                     <div class="bin landfill">
                         <div class="bin-guide-icon">&#128465;</div>
-                        <h4>Landfill</h4>
+                        <h4>Waste</h4>
                         <p>Non-recyclable items, mixed materials</p>
                     </div>
                     <div class="bin e-waste">
@@ -442,24 +444,9 @@
             </section>
 
             <section class="households-section">
-                <h3>Household List</h3>
-                <div class="household-table-container">
-                    <table class="household-table" id="householdTable">
-                        <thead>
-                            <tr>
-                                <th>House #</th>
-                                <th>Resident</th>
-                                <th>Bags</th>
-                                <th>Avg Score</th>
-                                <th>Status</th>
-                                <th>Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="householdTableBody">
-                        </tbody>
-                    </table>
-                    <p class="no-data-msg" id="noHouseholdsMsg">No households registered yet.</p>
-                </div>
+                <h3>Household Overview</h3>
+                <div class="household-grid" id="householdGrid"></div>
+                <p class="no-data-msg" id="noHouseholdsMsg">No households registered yet.</p>
             </section>
 
             <div class="feedback-modal" id="feedbackModal" style="display: none;">

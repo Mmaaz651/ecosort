@@ -7,16 +7,16 @@ let selectedBagType = 'green';
 let selectedSubmitBagType = 'green';
 
 const BIN_CONFIG = {
-    recycling: { icon: '♻️', name: 'Recycling', color: '#2196F3' },
-    compost: { icon: '🌱', name: 'Compost', color: '#4CAF50' },
-    landfill: { icon: '🗑️', name: 'Landfill', color: '#757575' },
-    'e-waste': { icon: '🔌', name: 'E-Waste', color: '#F44336' }
+    recycling: { icon: '♻️', name: 'Recycling', color: '#2D9CDB' },
+    compost: { icon: '🌱', name: 'Compost', color: '#22C55E' },
+    landfill: { icon: '🗑️', name: 'Waste', color: '#6B7280' },
+    'e-waste': { icon: '🔌', name: 'E-Waste', color: '#E4572E' }
 };
 
 const PICKUP_COLORS = {
-    green: { color: '#4CAF50', label: 'Compost' },
-    blue: { color: '#2196F3', label: 'Recycling' },
-    white: { color: '#9E9E9E', label: 'Landfill' }
+    green: { color: '#22C55E', label: 'Compost' },
+    blue: { color: '#2D9CDB', label: 'Recycling' },
+    white: { color: '#94A3B8', label: 'Waste' }
 };
 
 function showView(viewId) {
@@ -205,25 +205,36 @@ async function updateManagementDashboard() {
             : 0;
         document.getElementById('avgOverallScore').textContent = avgScore > 0 ? avgScore.toFixed(0) : '--';
         
-        const tbody = document.getElementById('householdTableBody');
+        const grid = document.getElementById('householdGrid');
         const noDataMsg = document.getElementById('noHouseholdsMsg');
         
         if (households.length === 0) {
-            tbody.innerHTML = '';
+            grid.innerHTML = '';
             noDataMsg.style.display = 'block';
         } else {
             noDataMsg.style.display = 'none';
-            tbody.innerHTML = households.map(h => {
+            grid.innerHTML = households.map(h => {
                 const statusClass = h.status === 'ok' ? 'status-ok' : h.status === 'review' ? 'status-review' : h.status === 'needs_attention' ? 'status-attention' : 'status-nodata';
                 const statusText = h.status === 'ok' ? 'OK' : h.status === 'review' ? 'Review' : h.status === 'needs_attention' ? 'Attention' : 'No Data';
-                return `<tr>
-                    <td>${h.house_number}</td>
-                    <td>${h.name}</td>
-                    <td>${h.bags_submitted}</td>
-                    <td>${h.avg_score > 0 ? h.avg_score.toFixed(0) : '--'}</td>
-                    <td><span class="status-badge ${statusClass}">${statusText}</span></td>
-                    <td><button class="feedback-btn" data-house="${h.house_number}">Feedback</button></td>
-                </tr>`;
+                return `<div class="household-card ${statusClass}">
+                    <div class="household-card-header">
+                        <span class="house-number">#${h.house_number}</span>
+                        <span class="status-badge ${statusClass}">${statusText}</span>
+                    </div>
+                    <div class="household-icon">🏠</div>
+                    <div class="household-name">${h.name || 'Resident'}</div>
+                    <div class="household-metrics">
+                        <div class="metric">
+                            <span class="metric-label">Bags</span>
+                            <span class="metric-value">${h.bags_submitted}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Avg</span>
+                            <span class="metric-value">${h.avg_score > 0 ? h.avg_score.toFixed(0) : '--'}</span>
+                        </div>
+                    </div>
+                    <button class="feedback-btn" data-house="${h.house_number}">Feedback</button>
+                </div>`;
             }).join('');
             
             document.querySelectorAll('.feedback-btn').forEach(btn => {
@@ -315,6 +326,7 @@ dropZone.addEventListener('drop', (e) => {
     }
 });
 dropZone.addEventListener('click', (e) => {
+    if (e.target.closest('.file-label')) return;
     if (e.target !== removeBtn && !removeBtn.contains(e.target) && !selectedFile) {
         fileInput.click();
     }
@@ -376,7 +388,7 @@ function displayResults(data) {
     document.getElementById('itemName').textContent = data.item;
     
     const binName = document.getElementById('binName');
-    binName.textContent = binConfig.name;
+    binName.textContent = binType === 'landfill' ? 'Waste' : binConfig.name;
     binName.className = 'bin-name ' + binType;
     
     document.getElementById('confidenceLabel').textContent = 'Confidence: ' + (data.confidence || 'Medium').charAt(0).toUpperCase() + (data.confidence || 'medium').slice(1);
@@ -420,6 +432,7 @@ bagDropZone.addEventListener('drop', (e) => {
     }
 });
 bagDropZone.addEventListener('click', (e) => {
+    if (e.target.closest('.file-label')) return;
     if (e.target !== bagRemoveBtn && !bagRemoveBtn.contains(e.target) && !selectedBagFile) {
         bagFileInput.click();
     }
@@ -548,6 +561,7 @@ submitDropZone.addEventListener('drop', (e) => {
     }
 });
 submitDropZone.addEventListener('click', (e) => {
+    if (e.target.closest('.file-label')) return;
     if (e.target !== submitRemoveBtn && !submitRemoveBtn.contains(e.target) && !selectedSubmitFile) {
         submitFileInput.click();
     }
@@ -630,3 +644,91 @@ function formatMoney(cents) {
 }
 
 showView('landingView');
+
+function initParticleBackground() {
+    const canvas = document.getElementById('bgCanvas');
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    const particles = [];
+    const maxDistance = 150;
+    const baseGreen = [34, 197, 94];
+
+    const resize = () => {
+        const ratio = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(window.innerWidth * ratio);
+        canvas.height = Math.floor(window.innerHeight * ratio);
+        canvas.style.width = `${window.innerWidth}px`;
+        canvas.style.height = `${window.innerHeight}px`;
+        ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    };
+
+    const createParticles = () => {
+        particles.length = 0;
+        const count = Math.min(120, Math.floor((window.innerWidth * window.innerHeight) / 12000));
+        for (let i = 0; i < count; i++) {
+            const radius = 2 + Math.random() * 2;
+            particles.push({
+                x: Math.random() * window.innerWidth,
+                y: Math.random() * window.innerHeight,
+                vx: (Math.random() - 0.5) * 0.35,
+                vy: (Math.random() - 0.5) * 0.35,
+                radius,
+                alpha: 0.3 + Math.random() * 0.4,
+                tint: Math.random() * 25
+            });
+        }
+    };
+
+    const draw = () => {
+        ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+
+        for (let i = 0; i < particles.length; i++) {
+            const p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+
+            if (p.x < -20) p.x = window.innerWidth + 20;
+            if (p.x > window.innerWidth + 20) p.x = -20;
+            if (p.y < -20) p.y = window.innerHeight + 20;
+            if (p.y > window.innerHeight + 20) p.y = -20;
+
+            const green = baseGreen[1] + p.tint;
+            ctx.fillStyle = `rgba(${baseGreen[0]}, ${green}, ${baseGreen[2]}, ${p.alpha})`;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        for (let i = 0; i < particles.length; i++) {
+            for (let j = i + 1; j < particles.length; j++) {
+                const p1 = particles[i];
+                const p2 = particles[j];
+                const dx = p1.x - p2.x;
+                const dy = p1.y - p2.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist < maxDistance) {
+                    const alpha = (1 - dist / maxDistance) * 0.25;
+                    ctx.strokeStyle = `rgba(34, 197, 94, ${alpha})`;
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        requestAnimationFrame(draw);
+    };
+
+    resize();
+    createParticles();
+    window.addEventListener('resize', () => {
+        resize();
+        createParticles();
+    });
+    draw();
+}
+
+initParticleBackground();

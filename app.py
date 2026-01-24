@@ -34,7 +34,7 @@ WASTE_DATA = {
         "money_factor": 0.4
     },
     "compost": {
-        "items": ["food scraps", "banana peel", "apple core", "coffee grounds", "tea bag", "eggshell", "vegetable peels", "fruit", "leaves", "grass clippings", "paper towel", "napkin"],
+        "items": ["food scraps", "banana peel", "apple core", "coffee grounds", "tea bag", "eggshell", "vegetable peels", "fruit", "leaves", "grass clippings", "paper towel", "napkin", "tissue", "pizza box (soiled)"],
         "co2_factor": 0.5,
         "money_factor": 0.2
     },
@@ -220,7 +220,7 @@ def submit_bag():
             messages=[
                 {
                     "role": "system",
-                    "content": f"""You are a waste sorting quality inspector. Analyze this image of a filled garbage bag and evaluate how well it is sorted.
+                    "content": f"""You are a PEI/IWMC waste sorting quality inspector. Analyze this image of a filled garbage bag and evaluate how well it is sorted according to PEI (Island Waste Management) guidelines.
 
 The user claims this is a {bag_type} bag. Evaluate if the contents match what should go in that bag type.
 
@@ -228,6 +228,10 @@ Bag color meanings (generic recycling guidelines):
 - Green bag: Compost/organic waste (food scraps, yard waste, organic matter)
 - Blue bag: Recycling (plastics, metals, glass, paper, cardboard)
 - White/Black bag: Landfill/general waste (non-recyclable items)
+
+PEI-specific notes:
+- Napkins, paper towels, tissues, and soiled paper belong in compost.
+- Food-soiled paper (e.g., greasy pizza boxes) belongs in compost.
 
 Respond with ONLY valid JSON in this exact format:
 {{
@@ -327,7 +331,7 @@ def classify_image():
             messages=[
                 {
                     "role": "system",
-                    "content": """You are a waste classification expert. Analyze the image and identify the main item that needs to be disposed of.
+                    "content": """You are a PEI/IWMC waste classification expert. Analyze the image and identify the main item that needs to be disposed of according to PEI (Island Waste Management) guidelines.
 
 Respond with ONLY valid JSON in this exact format:
 {
@@ -342,6 +346,10 @@ Bin categories:
 - compost: food waste, organic matter, yard waste
 - landfill: non-recyclable items, mixed materials, contaminated items
 - e-waste: electronics, batteries, cables, devices
+
+PEI-specific notes:
+- Napkins, paper towels, tissues, and soiled paper belong in compost.
+- Food-soiled paper (e.g., greasy pizza boxes) belongs in compost.
 
 Be specific about the item name and accurate with the bin classification."""
                 },
@@ -426,7 +434,7 @@ def check_bag():
             messages=[
                 {
                     "role": "system",
-                    "content": f"""You are a waste sorting quality inspector. Analyze this image of a filled garbage bag and evaluate how well it is sorted.
+                    "content": f"""You are a PEI/IWMC waste sorting quality inspector. Analyze this image of a filled garbage bag and evaluate how well it is sorted according to PEI (Island Waste Management) guidelines.
 
 The user claims this is a {bag_type} bag. Evaluate if the contents match what should go in that bag type.
 
@@ -434,6 +442,10 @@ Bag color meanings (generic recycling guidelines):
 - Green bag: Compost/organic waste (food scraps, yard waste, organic matter)
 - Blue bag: Recycling (plastics, metals, glass, paper, cardboard)
 - White/Black bag: Landfill/general waste (non-recyclable items)
+
+PEI-specific notes:
+- Napkins, paper towels, tissues, and soiled paper belong in compost.
+- Food-soiled paper (e.g., greasy pizza boxes) belongs in compost.
 
 Respond with ONLY valid JSON in this exact format:
 {{
