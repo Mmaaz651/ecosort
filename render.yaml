@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: carbon-craft-backend
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: AI_INTEGRATIONS_OPENAI_API_KEY
+        scope: run
+        sync: false
+      - key: AI_INTEGRATIONS_OPENAI_BASE_URL
+        scope: run
+        sync: false
+        value: https://api.openai.com/v1
