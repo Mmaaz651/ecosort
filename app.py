@@ -1,5 +1,7 @@
 import os
 import base64
+import json
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify, send_from_directory
 from openai import OpenAI
 
@@ -9,6 +11,21 @@ client = OpenAI(
     api_key=os.environ.get("AI_INTEGRATIONS_OPENAI_API_KEY"),
     base_url=os.environ.get("AI_INTEGRATIONS_OPENAI_BASE_URL")
 )
+
+users_db = {}
+bag_submissions_db = []
+management_feedback_db = {}
+
+MANAGEMENT_ID = "123"
+MANAGEMENT_KEY = "123"
+
+PICKUP_SCHEDULE = {
+    "Monday": "green",
+    "Tuesday": "blue",
+    "Wednesday": "white",
+    "Thursday": "green",
+    "Friday": "blue"
+}
 
 WASTE_DATA = {
     "recycling": {
@@ -33,6 +50,22 @@ WASTE_DATA = {
     }
 }
 
+def calculate_points(score):
+    if score >= 90:
+        return 100
+    elif score >= 80:
+        return 75
+    elif score >= 70:
+        return 50
+    elif score >= 60:
+        return 25
+    else:
+        return 0
+
+def get_week_start():
+    today = datetime.now()
+    return today - timedelta(days=today.weekday())
+
 @app.route('/')
 def index():
     return send_from_directory('static', 'index.html')
@@ -40,6 +73,239 @@ def index():
 @app.route('/static/<path:path>')
 def serve_static(path):
     return send_from_directory('static', path)
+
+@app.route('/api/user/register', methods=['POST'])
+def register_user():
+    data = request.json
+    name = data.get('name', '').strip()
+    house_number = data.get('house_number', '').strip()
+    
+    if not name or not house_number:
+        return jsonify({"error": "Name and house number are required"}), 400
+    
+    if house_number not in users_db:
+        users_db[house_number] = {
+            "name": name,
+            "house_number": house_number,
+            "created_at": datetime.now().isoformat(),
+            "total_points": 0
+        }
+    else:
+        users_db[house_number]["name"] = name
+    
+    return jsonify({
+        "success": True,
+        "user": users_db[house_number]
+    })
+
+@app.route('/api/user/<house_number>', methods=['GET'])
+def get_user(house_number):
+    if house_number not in users_db:
+        return jsonify({"error": "User not found"}), 404
+    
+    return jsonify(users_db[house_number])
+
+@app.route('/api/user/<house_number>/stats', methods=['GET'])
+def get_user_stats(house_number):
+    week_start = get_week_start()
+    
+    user_submissions = [s for s in bag_submissions_db 
+                       if s['house_number'] == house_number]
+    
+    weekly_submissions = [s for s in user_submissions 
+                         if datetime.fromisoformat(s['submitted_at']) >= week_start]
+    
+    total_bags = len(weekly_submissions)
+    avg_score = sum(s['score'] for s in weekly_submissions) / total_bags if total_bags > 0 else 0
+    
+    total_points = users_db.get(house_number, {}).get('total_points', 0)
+    
+    feedback = management_feedback_db.get(house_number, [])
+    
+    return jsonify({
+        "weekly_bags": total_bags,
+        "weekly_avg_score": round(avg_score, 1),
+        "total_points": total_points,
+        "total_submissions": len(user_submissions),
+        "recent_submissions": weekly_submissions[-5:] if weekly_submissions else [],
+        "pickup_schedule": PICKUP_SCHEDULE,
+        "management_feedback": feedback[-3:] if feedback else []
+    })
+
+@app.route('/api/management/login', methods=['POST'])
+def management_login():
+    data = request.json
+    mgmt_id = data.get('id', '')
+    mgmt_key = data.get('key', '')
+    
+    if mgmt_id == MANAGEMENT_ID and mgmt_key == MANAGEMENT_KEY:
+        return jsonify({"success": True})
+    else:
+        return jsonify({"error": "Invalid credentials"}), 401
+
+@app.route('/api/management/households', methods=['GET'])
+def get_households():
+    households = []
+    
+    for house_number, user in users_db.items():
+        submissions = [s for s in bag_submissions_db if s['house_number'] == house_number]
+        avg_score = sum(s['score'] for s in submissions) / len(submissions) if submissions else 0
+        
+        status = "ok"
+        if len(submissions) == 0:
+            status = "no_data"
+        elif avg_score < 60:
+            status = "needs_attention"
+        elif avg_score < 75:
+            status = "review"
+        
+        households.append({
+            "house_number": house_number,
+            "name": user["name"],
+            "bags_submitted": len(submissions),
+            "avg_score": round(avg_score, 1),
+            "total_points": user.get("total_points", 0),
+            "status": status,
+            "last_submission": submissions[-1]["submitted_at"] if submissions else None
+        })
+    
+    return jsonify(households)
+
+@app.route('/api/management/feedback', methods=['POST'])
+def submit_feedback():
+    data = request.json
+    house_number = data.get('house_number')
+    feedback_text = data.get('feedback', '').strip()
+    point_adjustment = data.get('point_adjustment', 0)
+    
+    if not house_number or house_number not in users_db:
+        return jsonify({"error": "Invalid house number"}), 400
+    
+    feedback_entry = {
+        "feedback": feedback_text,
+        "point_adjustment": point_adjustment,
+        "submitted_at": datetime.now().isoformat()
+    }
+    
+    if house_number not in management_feedback_db:
+        management_feedback_db[house_number] = []
+    management_feedback_db[house_number].append(feedback_entry)
+    
+    users_db[house_number]["total_points"] += point_adjustment
+    
+    return jsonify({"success": True})
+
+@app.route('/api/bag/submit', methods=['POST'])
+def submit_bag():
+    if 'image' not in request.files:
+        return jsonify({"error": "No image provided"}), 400
+    
+    file = request.files['image']
+    if file.filename == '':
+        return jsonify({"error": "No image selected"}), 400
+    
+    house_number = request.form.get('house_number')
+    bag_type = request.form.get('bag_type', 'unknown')
+    
+    if not house_number or house_number not in users_db:
+        return jsonify({"error": "Invalid house number. Please register first."}), 400
+    
+    image_data = file.read()
+    base64_image = base64.b64encode(image_data).decode('utf-8')
+    mime_type = file.content_type or 'image/jpeg'
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {
+                    "role": "system",
+                    "content": f"""You are a waste sorting quality inspector. Analyze this image of a filled garbage bag and evaluate how well it is sorted.
+
+The user claims this is a {bag_type} bag. Evaluate if the contents match what should go in that bag type.
+
+Bag color meanings (generic recycling guidelines):
+- Green bag: Compost/organic waste (food scraps, yard waste, organic matter)
+- Blue bag: Recycling (plastics, metals, glass, paper, cardboard)
+- White/Black bag: Landfill/general waste (non-recyclable items)
+
+Respond with ONLY valid JSON in this exact format:
+{{
+    "score": integer from 0-100 representing sorting quality,
+    "grade": "A", "B", "C", "D", or "F" based on score,
+    "is_properly_sorted": true or false,
+    "items_detected": ["list", "of", "visible", "items"],
+    "contamination_issues": ["list of items that don't belong in this bag type"],
+    "explanation": "Brief explanation of why the bag received this score",
+    "suggestions": ["actionable suggestion 1", "actionable suggestion 2"],
+    "confidence": "high", "medium", or "low"
+}}"""
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Evaluate this {bag_type} garbage bag. Is it properly sorted?"
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{base64_image}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=600
+        )
+        
+        result_content = response.choices[0].message.content
+        if result_content is None:
+            raise ValueError("No response from AI model")
+        result_text = result_content.strip()
+        
+        if result_text.startswith("```"):
+            result_text = result_text.split("```")[1]
+            if result_text.startswith("json"):
+                result_text = result_text[4:]
+        result_text = result_text.strip()
+        
+        ai_result = json.loads(result_text)
+        
+        score = ai_result.get("score", 50)
+        points_earned = calculate_points(score)
+        
+        submission = {
+            "id": len(bag_submissions_db) + 1,
+            "house_number": house_number,
+            "bag_type": bag_type,
+            "score": score,
+            "grade": ai_result.get("grade", "C"),
+            "is_properly_sorted": ai_result.get("is_properly_sorted", False),
+            "items_detected": ai_result.get("items_detected", []),
+            "contamination_issues": ai_result.get("contamination_issues", []),
+            "explanation": ai_result.get("explanation", ""),
+            "suggestions": ai_result.get("suggestions", []),
+            "confidence": ai_result.get("confidence", "low"),
+            "points_earned": points_earned,
+            "submitted_at": datetime.now().isoformat()
+        }
+        
+        bag_submissions_db.append(submission)
+        users_db[house_number]["total_points"] += points_earned
+        
+        return jsonify({
+            **submission,
+            "total_points": users_db[house_number]["total_points"]
+        })
+        
+    except Exception as e:
+        print(f"Error analyzing bag: {e}")
+        return jsonify({
+            "error": "Failed to analyze bag. Please try again.",
+            "details": str(e)
+        }), 500
 
 @app.route('/classify-image', methods=['POST'])
 def classify_image():
@@ -109,7 +375,6 @@ Be specific about the item name and accurate with the bin classification."""
                 result_text = result_text[4:]
         result_text = result_text.strip()
         
-        import json
         ai_result = json.loads(result_text)
         
         item = ai_result.get("item", "unknown item")
@@ -222,7 +487,6 @@ Be honest about limitations - if the image is unclear or you cannot identify ite
                 result_text = result_text[4:]
         result_text = result_text.strip()
         
-        import json
         ai_result = json.loads(result_text)
         
         return jsonify({
