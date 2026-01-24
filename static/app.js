@@ -26,6 +26,55 @@ function showView(viewId) {
     document.getElementById(viewId).style.display = 'block';
 }
 
+function resetUserSession() {
+    selectedFile = null;
+    selectedBagFile = null;
+    selectedSubmitFile = null;
+    selectedBagType = 'green';
+    selectedSubmitBagType = 'green';
+    
+    document.getElementById('imagePreview').src = '';
+    document.getElementById('previewContainer').style.display = 'none';
+    document.getElementById('dropZone').querySelector('.upload-content').style.display = 'flex';
+    document.getElementById('classifyBtn').disabled = true;
+    document.getElementById('fileInput').value = '';
+    
+    document.getElementById('bagImagePreview').src = '';
+    document.getElementById('bagPreviewContainer').style.display = 'none';
+    document.getElementById('bagUploadContent').style.display = 'flex';
+    document.getElementById('checkBagBtn').disabled = true;
+    document.getElementById('bagFileInput').value = '';
+    
+    document.getElementById('submitImagePreview').src = '';
+    document.getElementById('submitPreviewContainer').style.display = 'none';
+    document.getElementById('submitUploadContent').style.display = 'flex';
+    document.getElementById('submitBagBtn').disabled = true;
+    document.getElementById('submitFileInput').value = '';
+    
+    document.getElementById('resultsSection').style.display = 'none';
+    document.getElementById('bagResultsSection').style.display = 'none';
+    document.getElementById('submitResultsSection').style.display = 'none';
+    document.getElementById('bagSubmitSection').style.display = 'none';
+    
+    document.getElementById('itemScannerSection').style.display = 'block';
+    document.getElementById('bagCheckerSection').style.display = 'none';
+    
+    document.getElementById('itemScannerSteps').style.display = 'flex';
+    document.getElementById('bagCheckerSteps').style.display = 'none';
+    document.getElementById('bagSubmitSteps').style.display = 'none';
+    
+    document.querySelectorAll('.user-tabs .tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector('.user-tabs .tab-btn[data-tab="item-scanner"]').classList.add('active');
+    
+    document.querySelectorAll('.bag-checker-section .bag-option').forEach(b => b.classList.remove('active'));
+    document.querySelector('.bag-checker-section .bag-option[data-bag="green"]').classList.add('active');
+    document.querySelectorAll('.submit-bag-options .bag-option').forEach(b => b.classList.remove('active'));
+    document.querySelector('.submit-bag-options .bag-option[data-bag="green"]').classList.add('active');
+    
+    document.getElementById('userName').value = '';
+    document.getElementById('houseNumber').value = '';
+}
+
 document.getElementById('userAccessBtn').addEventListener('click', () => showView('userLoginView'));
 document.getElementById('mgmtAccessBtn').addEventListener('click', () => showView('mgmtLoginView'));
 document.getElementById('userCardBtn').addEventListener('click', () => showView('userLoginView'));
@@ -49,6 +98,7 @@ document.getElementById('userLoginForm').addEventListener('submit', async (e) =>
         
         currentUser = data.user;
         isManagement = false;
+        resetUserSession();
         showView('userDashboard');
         updateUserDashboard();
     } catch (error) {
@@ -80,6 +130,7 @@ document.getElementById('mgmtLoginForm').addEventListener('submit', async (e) =>
 
 document.getElementById('userLogout').addEventListener('click', () => {
     currentUser = null;
+    resetUserSession();
     showView('landingView');
 });
 
