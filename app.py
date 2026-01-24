@@ -85,6 +85,16 @@ WASTE_DATA = {
     }
 }
 
+def normalize_house_number(house_number):
+    if house_number is None:
+        return ''
+    return str(house_number).strip().upper()
+
+def normalize_name(name):
+    if name is None:
+        return ''
+    return str(name).strip()
+
 def calculate_points(score):
     if score >= 90:
         return 100
@@ -102,6 +112,7 @@ def get_week_start():
     return today - timedelta(days=today.weekday())
 
 def get_redemption_summary(house_number):
+    house_number = normalize_house_number(house_number)
     redemptions = [r for r in redemptions_db if r.get("house_number") == house_number]
     tree_count = sum(1 for r in redemptions if r.get("reward_id") == "tree")
     local_credit_rewards = {"farmers_market", "refill_shop", "cavendish", "bike_tune"}
@@ -121,9 +132,9 @@ def serve_static(path):
 
 @app.route('/api/user/register', methods=['POST'])
 def register_user():
-    data = request.json
-    name = data.get('name', '').strip()
-    house_number = data.get('house_number', '').strip()
+    data = request.json or {}
+    name = normalize_name(data.get('name', ''))
+    house_number = normalize_house_number(data.get('house_number', ''))
     
     if not name or not house_number:
         return jsonify({"error": "Name and house number are required"}), 400
@@ -136,7 +147,9 @@ def register_user():
             "total_points": 0
         }
     else:
-        users_db[house_number]["name"] = name
+        existing_name = users_db[house_number].get("name", "")
+        if name and name.casefold() != existing_name.casefold():
+            users_db[house_number]["name"] = name
     
     return jsonify({
         "success": True,
@@ -145,6 +158,7 @@ def register_user():
 
 @app.route('/api/user/<house_number>', methods=['GET'])
 def get_user(house_number):
+    house_number = normalize_house_number(house_number)
     if house_number not in users_db:
         return jsonify({"error": "User not found"}), 404
     
@@ -152,6 +166,7 @@ def get_user(house_number):
 
 @app.route('/api/user/<house_number>/stats', methods=['GET'])
 def get_user_stats(house_number):
+    house_number = normalize_house_number(house_number)
     week_start = get_week_start()
     
     user_submissions = [s for s in bag_submissions_db 
@@ -197,6 +212,10 @@ def get_households():
         submissions = [s for s in bag_submissions_db if s['house_number'] == house_number]
         avg_score = sum(s['score'] for s in submissions) / len(submissions) if submissions else 0
         recent_submissions = submissions[-3:] if submissions else []
+        bag_types_submitted = sorted({
+            s.get("bag_type") for s in submissions
+            if s.get("bag_type") in VALID_BAG_TYPES
+        })
         recent_bags = [
             {
                 "id": s.get("id"),
@@ -232,7 +251,8 @@ def get_households():
             "total_points": user.get("total_points", 0),
             "status": status,
             "last_submission": submissions[-1]["submitted_at"] if submissions else None,
-            "recent_bags": list(reversed(recent_bags))
+            "recent_bags": list(reversed(recent_bags)),
+            "bag_types_submitted": bag_types_submitted
         })
     
     return jsonify(households)
@@ -240,7 +260,7 @@ def get_households():
 @app.route('/api/management/feedback', methods=['POST'])
 def submit_feedback():
     data = request.json or {}
-    house_number = data.get('house_number')
+    house_number = normalize_house_number(data.get('house_number'))
     feedback_text = (data.get('feedback') or '').strip()
     point_adjustment = data.get('point_adjustment', 0)
     try:
@@ -307,7 +327,7 @@ def submit_feedback():
 @app.route('/api/user/redeem', methods=['POST'])
 def redeem_points():
     data = request.json or {}
-    house_number = data.get('house_number')
+    house_number = normalize_house_number(data.get('house_number'))
     reward_id = (data.get('reward_id') or '').strip()
 
     if not house_number or house_number not in users_db:
@@ -345,7 +365,7 @@ def redeem_points():
 @app.route('/api/bag/submit-batch', methods=['POST'])
 def submit_bag_batch():
     data = request.json or {}
-    house_number = data.get('house_number')
+    house_number = normalize_house_number(data.get('house_number'))
     bags = data.get('bags', [])
 
     if not house_number or house_number not in users_db:
@@ -413,7 +433,7 @@ def submit_bag():
     if file.filename == '':
         return jsonify({"error": "No image selected"}), 400
     
-    house_number = request.form.get('house_number')
+    house_number = normalize_house_number(request.form.get('house_number'))
     bag_type = request.form.get('bag_type', 'unknown')
     
     if not house_number or house_number not in users_db:

@@ -25,7 +25,10 @@ const BAG_TYPE_META = {
     white: { label: 'White', name: 'Waste' }
 };
 
+const FEEDBACK_BAG_ORDER = ['green', 'blue', 'white'];
+
 const managementBagCache = new Map();
+const householdBagTypes = new Map();
 let selectedFeedbackBagType = 'green';
 
 const FEEDBACK_REASONS = {
@@ -283,6 +286,12 @@ async function updateManagementDashboard() {
         const households = await response.json();
 
         managementBagCache.clear();
+        householdBagTypes.clear();
+        households.forEach(h => {
+            const types = Array.isArray(h.bag_types_submitted) ? h.bag_types_submitted : [];
+            const cleanTypes = types.filter(type => typeof type === 'string');
+            householdBagTypes.set(String(h.house_number), new Set(cleanTypes));
+        });
         
         document.getElementById('totalHouseholds').textContent = households.length;
         
@@ -345,9 +354,16 @@ async function updateManagementDashboard() {
 let currentFeedbackHouse = null;
 const feedbackReasonList = document.getElementById('feedbackReasonList');
 const feedbackBagButtons = document.querySelectorAll('.feedback-bag-options .bag-option');
+const feedbackConfirmationModal = document.getElementById('feedbackConfirmationModal');
+const feedbackConfirmationHouse = document.getElementById('feedbackConfirmationHouse');
+const feedbackConfirmationClose = document.getElementById('feedbackConfirmationClose');
 
 function renderFeedbackReasons(bagType) {
     if (!feedbackReasonList) return;
+    if (!bagType) {
+        feedbackReasonList.innerHTML = '<p class="reason-empty">No bag submissions yet.</p>';
+        return;
+    }
     const reasons = FEEDBACK_REASONS[bagType] || [];
     feedbackReasonList.innerHTML = reasons.map(reason => `
         <label class="reason-item">
@@ -358,6 +374,15 @@ function renderFeedbackReasons(bagType) {
 }
 
 function setFeedbackBagType(bagType) {
+    if (!bagType) {
+        selectedFeedbackBagType = null;
+        feedbackBagButtons.forEach(btn => btn.classList.remove('active'));
+        renderFeedbackReasons(null);
+        return;
+    }
+    const targetButton = Array.from(feedbackBagButtons)
+        .find(btn => btn.dataset.bag === bagType);
+    if (targetButton && targetButton.disabled) return;
     selectedFeedbackBagType = bagType;
     feedbackBagButtons.forEach(btn => {
         btn.classList.toggle('active', btn.dataset.bag === bagType);
@@ -365,17 +390,42 @@ function setFeedbackBagType(bagType) {
     renderFeedbackReasons(bagType);
 }
 
+function applyFeedbackBagAvailability(availableTypes) {
+    const hasAvailable = availableTypes && availableTypes.size > 0;
+    feedbackBagButtons.forEach(btn => {
+        const bagType = btn.dataset.bag;
+        const isAvailable = hasAvailable && availableTypes.has(bagType);
+        btn.disabled = !isAvailable;
+        btn.classList.toggle('disabled', !isAvailable);
+        if (!isAvailable) {
+            btn.classList.remove('active');
+        }
+    });
+    if (!hasAvailable) {
+        setFeedbackBagType(null);
+        return;
+    }
+    const preferred = (selectedFeedbackBagType && availableTypes.has(selectedFeedbackBagType))
+        ? selectedFeedbackBagType
+        : FEEDBACK_BAG_ORDER.find(type => availableTypes.has(type));
+    setFeedbackBagType(preferred || null);
+}
+
 function openFeedbackModal(houseNumber) {
     currentFeedbackHouse = houseNumber;
     document.getElementById('feedbackHouseNum').textContent = houseNumber;
     document.getElementById('feedbackText').value = '';
     document.getElementById('pointsOverride').value = '';
-    setFeedbackBagType('green');
+    const availableTypes = householdBagTypes.get(String(houseNumber)) || new Set();
+    applyFeedbackBagAvailability(availableTypes);
     document.getElementById('feedbackModal').style.display = 'flex';
 }
 
 feedbackBagButtons.forEach(btn => {
-    btn.addEventListener('click', () => setFeedbackBagType(btn.dataset.bag));
+    btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        setFeedbackBagType(btn.dataset.bag);
+    });
 });
 
 document.getElementById('cancelFeedback').addEventListener('click', () => {
@@ -415,11 +465,34 @@ document.getElementById('feedbackForm').addEventListener('submit', async (e) => 
         
         document.getElementById('feedbackModal').style.display = 'none';
         updateManagementDashboard();
-        alert('Feedback sent successfully!');
+        if (feedbackConfirmationHouse) {
+            feedbackConfirmationHouse.textContent = currentFeedbackHouse || '';
+        }
+        if (feedbackConfirmationModal) {
+            feedbackConfirmationModal.style.display = 'flex';
+        }
     } catch (error) {
         alert('Failed to send feedback: ' + error.message);
     }
 });
+
+function closeFeedbackConfirmation() {
+    if (feedbackConfirmationModal) {
+        feedbackConfirmationModal.style.display = 'none';
+    }
+}
+
+if (feedbackConfirmationClose) {
+    feedbackConfirmationClose.addEventListener('click', closeFeedbackConfirmation);
+}
+
+if (feedbackConfirmationModal) {
+    feedbackConfirmationModal.addEventListener('click', (e) => {
+        if (e.target.id === 'feedbackConfirmationModal') {
+            closeFeedbackConfirmation();
+        }
+    });
+}
 
 const redeemModal = document.getElementById('redeemModal');
 const redeemOptions = document.querySelectorAll('.redeem-option');

@@ -577,6 +577,22 @@ h2 {
     font-size: 0.85rem;
 }
 
+.feedback-bag-options .bag-option.disabled,
+.feedback-bag-options .bag-option:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    border-color: rgba(148, 163, 184, 0.25);
+    background: rgba(19, 42, 34, 0.4);
+    box-shadow: none;
+    transform: none;
+}
+
+.feedback-bag-options .bag-option.disabled .bag-color-dot,
+.feedback-bag-options .bag-option:disabled .bag-color-dot {
+    filter: grayscale(1);
+    opacity: 0.6;
+}
+
 .reason-list {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -596,6 +612,14 @@ h2 {
 
 .reason-item input {
     accent-color: var(--primary-green);
+}
+
+.reason-empty {
+    margin: 0;
+    color: var(--muted-foreground);
+    font-size: 0.85rem;
+    grid-column: 1 / -1;
+    text-align: center;
 }
 
 .user-tabs {
@@ -1775,6 +1799,30 @@ footer {
 .modal-content h3 {
     color: var(--foreground);
     margin-bottom: 20px;
+}
+
+.feedback-confirmation-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2050;
+}
+
+.feedback-confirmation-content {
+    background: #162E26;
+    padding: 28px;
+    border-radius: 16px;
+    width: min(420px, 90vw);
+    border: 1px solid var(--border);
+    text-align: center;
+}
+
+.feedback-confirmation-content p {
+    color: var(--muted-foreground);
+    margin: 0 0 20px;
 }
 
 .redeem-modal {
