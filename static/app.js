@@ -2,9 +2,9 @@ let currentUser = null;
 let isManagement = false;
 let selectedFile = null;
 let selectedBagFile = null;
-let selectedSubmitFile = null;
 let selectedBagType = 'green';
-let selectedSubmitBagType = 'green';
+let currentBagAnalysis = null;
+let stagedBags = [];
 
 const BIN_CONFIG = {
     recycling: { icon: '♻️', name: 'Recycling', color: '#2D9CDB' },
@@ -19,6 +19,39 @@ const PICKUP_COLORS = {
     white: { color: '#94A3B8', label: 'Waste' }
 };
 
+const BAG_TYPE_META = {
+    green: { label: 'Green', name: 'Compost' },
+    blue: { label: 'Blue', name: 'Recycling' },
+    white: { label: 'White', name: 'Waste' }
+};
+
+const managementBagCache = new Map();
+let selectedFeedbackBagType = 'green';
+
+const FEEDBACK_REASONS = {
+    green: [
+        'Waste in compost',
+        'Recycling in compost',
+        'Plastic bags in compost',
+        'Glass or metal in compost',
+        'Liquids in compost'
+    ],
+    blue: [
+        'Waste in recycling',
+        'Food residue in recycling',
+        'Plastic film in recycling',
+        'Electronics in recycling',
+        'Liquids in recycling'
+    ],
+    white: [
+        'Recycling in waste',
+        'Compost in waste',
+        'Batteries in waste',
+        'Hazardous items in waste',
+        'E-waste in waste'
+    ]
+};
+
 function showView(viewId) {
     ['landingView', 'userLoginView', 'mgmtLoginView', 'userDashboard', 'mgmtDashboard'].forEach(id => {
         document.getElementById(id).style.display = 'none';
@@ -29,9 +62,9 @@ function showView(viewId) {
 function resetUserSession() {
     selectedFile = null;
     selectedBagFile = null;
-    selectedSubmitFile = null;
     selectedBagType = 'green';
-    selectedSubmitBagType = 'green';
+    currentBagAnalysis = null;
+    stagedBags = [];
     
     document.getElementById('imagePreview').src = '';
     document.getElementById('previewContainer').style.display = 'none';
@@ -45,31 +78,23 @@ function resetUserSession() {
     document.getElementById('checkBagBtn').disabled = true;
     document.getElementById('bagFileInput').value = '';
     
-    document.getElementById('submitImagePreview').src = '';
-    document.getElementById('submitPreviewContainer').style.display = 'none';
-    document.getElementById('submitUploadContent').style.display = 'flex';
-    document.getElementById('submitBagBtn').disabled = true;
-    document.getElementById('submitFileInput').value = '';
-    
     document.getElementById('resultsSection').style.display = 'none';
     document.getElementById('bagResultsSection').style.display = 'none';
-    document.getElementById('submitResultsSection').style.display = 'none';
-    document.getElementById('bagSubmitSection').style.display = 'none';
+    document.getElementById('bagQueueSection').style.display = 'none';
     
     document.getElementById('itemScannerSection').style.display = 'block';
     document.getElementById('bagCheckerSection').style.display = 'none';
     
     document.getElementById('itemScannerSteps').style.display = 'flex';
     document.getElementById('bagCheckerSteps').style.display = 'none';
-    document.getElementById('bagSubmitSteps').style.display = 'none';
     
     document.querySelectorAll('.user-tabs .tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelector('.user-tabs .tab-btn[data-tab="item-scanner"]').classList.add('active');
     
     document.querySelectorAll('.bag-checker-section .bag-option').forEach(b => b.classList.remove('active'));
     document.querySelector('.bag-checker-section .bag-option[data-bag="green"]').classList.add('active');
-    document.querySelectorAll('.submit-bag-options .bag-option').forEach(b => b.classList.remove('active'));
-    document.querySelector('.submit-bag-options .bag-option[data-bag="green"]').classList.add('active');
+
+    renderBagQueue();
     
     document.getElementById('userName').value = '';
     document.getElementById('houseNumber').value = '';
@@ -150,6 +175,8 @@ async function updateUserDashboard() {
         const stats = await response.json();
         
         document.getElementById('userPoints').textContent = stats.total_points || 0;
+        updateRedeemState(stats.total_points || 0);
+        updatePointsImpact(stats.total_points || 0, stats.redemption_summary);
         document.getElementById('weeklyBags').textContent = stats.weekly_bags || 0;
         document.getElementById('weeklyScore').textContent = stats.weekly_avg_score ? stats.weekly_avg_score.toFixed(0) : '--';
         
@@ -177,8 +204,23 @@ async function updateUserDashboard() {
                 const fbEl = document.createElement('div');
                 fbEl.className = 'feedback-item';
                 const pointClass = fb.point_adjustment > 0 ? 'positive' : fb.point_adjustment < 0 ? 'negative' : '';
-                fbEl.innerHTML = `<p>${fb.feedback}</p>
-                    ${fb.point_adjustment !== 0 ? `<span class="point-change ${pointClass}">${fb.point_adjustment > 0 ? '+' : ''}${fb.point_adjustment} points</span>` : ''}`;
+                const message = fb.feedback || 'Sorting issue noted.';
+                const tags = [];
+                if (fb.bag_type) {
+                    const bagMeta = BAG_TYPE_META[fb.bag_type] || { label: fb.bag_type };
+                    tags.push(`<span class="feedback-tag type-${fb.bag_type}">${bagMeta.label} Bag</span>`);
+                }
+                if (Array.isArray(fb.reasons) && fb.reasons.length > 0) {
+                    fb.reasons.forEach(reason => tags.push(`<span class="feedback-tag">${reason}</span>`));
+                }
+                if (fb.points_override !== undefined && fb.points_override !== null) {
+                    tags.push(`<span class="feedback-tag points">Points set to ${fb.points_override}</span>`);
+                }
+                const tagsHtml = tags.length > 0 ? `<div class="feedback-tags">${tags.join('')}</div>` : '';
+                const pointsHtml = fb.point_adjustment !== 0
+                    ? `<span class="point-change ${pointClass}">${fb.point_adjustment > 0 ? '+' : ''}${fb.point_adjustment} points</span>`
+                    : '';
+                fbEl.innerHTML = `<p>${message}</p>${tagsHtml}${pointsHtml}`;
                 feedbackList.appendChild(fbEl);
             });
         } else {
@@ -189,10 +231,58 @@ async function updateUserDashboard() {
     }
 }
 
+function formatBagSubmittedAt(isoString) {
+    if (!isoString) return '--';
+    const date = new Date(isoString);
+    if (Number.isNaN(date.getTime())) return '--';
+    return date.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
+}
+
+function buildBagThumbs(household) {
+    const bags = household.recent_bags || [];
+    if (bags.length === 0) {
+        return `<div class="bag-thumbs bag-thumbs-empty"><span>No bag photos yet</span></div>`;
+    }
+
+    const thumbsMarkup = bags.map((bag, index) => {
+        const bagKey = bag.id !== undefined && bag.id !== null
+            ? String(bag.id)
+            : `${household.house_number}-${bag.submitted_at || index}`;
+        const bagType = bag.bag_type || 'unknown';
+        const bagMeta = BAG_TYPE_META[bagType] || { label: 'Unknown', name: 'Bag' };
+        const scoreValue = Number.isFinite(bag.score) ? Math.round(bag.score) : '--';
+        const scoreLabel = scoreValue === '--' ? '--' : `${scoreValue}%`;
+        const imageMarkup = bag.image_data
+            ? `<img src="${bag.image_data}" alt="${bagMeta.label} bag preview">`
+            : `<div class="bag-thumb-placeholder">${bagMeta.label}</div>`;
+
+        managementBagCache.set(bagKey, {
+            ...bag,
+            id: bagKey,
+            house_number: household.house_number,
+            resident_name: household.name
+        });
+
+        return `<button class="bag-thumb type-${bagType}" data-bag-id="${bagKey}" aria-label="${bagMeta.label} bag score ${scoreLabel}">
+            ${imageMarkup}
+            <span class="bag-thumb-score">${scoreLabel}</span>
+        </button>`;
+    }).join('');
+
+    return `<div class="bag-thumbs">${thumbsMarkup}</div>`;
+}
+
 async function updateManagementDashboard() {
     try {
         const response = await fetch('/api/management/households');
         const households = await response.json();
+
+        managementBagCache.clear();
         
         document.getElementById('totalHouseholds').textContent = households.length;
         
@@ -216,6 +306,7 @@ async function updateManagementDashboard() {
             grid.innerHTML = households.map(h => {
                 const statusClass = h.status === 'ok' ? 'status-ok' : h.status === 'review' ? 'status-review' : h.status === 'needs_attention' ? 'status-attention' : 'status-nodata';
                 const statusText = h.status === 'ok' ? 'OK' : h.status === 'review' ? 'Review' : h.status === 'needs_attention' ? 'Attention' : 'No Data';
+                const bagThumbs = buildBagThumbs(h);
                 return `<div class="household-card ${statusClass}">
                     <div class="household-card-header">
                         <span class="house-number">#${h.house_number}</span>
@@ -233,12 +324,17 @@ async function updateManagementDashboard() {
                             <span class="metric-value">${h.avg_score > 0 ? h.avg_score.toFixed(0) : '--'}</span>
                         </div>
                     </div>
+                    ${bagThumbs}
                     <button class="feedback-btn" data-house="${h.house_number}">Feedback</button>
                 </div>`;
             }).join('');
             
             document.querySelectorAll('.feedback-btn').forEach(btn => {
                 btn.addEventListener('click', () => openFeedbackModal(btn.dataset.house));
+            });
+
+            document.querySelectorAll('.bag-thumb').forEach(btn => {
+                btn.addEventListener('click', () => openBagDetail(btn.dataset.bagId));
             });
         }
     } catch (error) {
@@ -247,14 +343,40 @@ async function updateManagementDashboard() {
 }
 
 let currentFeedbackHouse = null;
+const feedbackReasonList = document.getElementById('feedbackReasonList');
+const feedbackBagButtons = document.querySelectorAll('.feedback-bag-options .bag-option');
+
+function renderFeedbackReasons(bagType) {
+    if (!feedbackReasonList) return;
+    const reasons = FEEDBACK_REASONS[bagType] || [];
+    feedbackReasonList.innerHTML = reasons.map(reason => `
+        <label class="reason-item">
+            <input type="checkbox" value="${reason}">
+            <span>${reason}</span>
+        </label>
+    `).join('');
+}
+
+function setFeedbackBagType(bagType) {
+    selectedFeedbackBagType = bagType;
+    feedbackBagButtons.forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.bag === bagType);
+    });
+    renderFeedbackReasons(bagType);
+}
 
 function openFeedbackModal(houseNumber) {
     currentFeedbackHouse = houseNumber;
     document.getElementById('feedbackHouseNum').textContent = houseNumber;
     document.getElementById('feedbackText').value = '';
-    document.getElementById('pointAdjustment').value = '0';
+    document.getElementById('pointsOverride').value = '';
+    setFeedbackBagType('green');
     document.getElementById('feedbackModal').style.display = 'flex';
 }
+
+feedbackBagButtons.forEach(btn => {
+    btn.addEventListener('click', () => setFeedbackBagType(btn.dataset.bag));
+});
 
 document.getElementById('cancelFeedback').addEventListener('click', () => {
     document.getElementById('feedbackModal').style.display = 'none';
@@ -264,7 +386,17 @@ document.getElementById('feedbackForm').addEventListener('submit', async (e) => 
     e.preventDefault();
     
     const feedback = document.getElementById('feedbackText').value.trim();
-    const pointAdjustment = parseInt(document.getElementById('pointAdjustment').value);
+    const pointsOverrideInput = document.getElementById('pointsOverride').value.trim();
+    let pointsOverride = null;
+    if (pointsOverrideInput !== '') {
+        pointsOverride = parseInt(pointsOverrideInput, 10);
+        if (!Number.isFinite(pointsOverride) || pointsOverride < 0) {
+            alert('Override points must be a non-negative number.');
+            return;
+        }
+    }
+    const reasons = Array.from(document.querySelectorAll('#feedbackReasonList input[type="checkbox"]:checked'))
+        .map(input => input.value);
     
     try {
         const response = await fetch('/api/management/feedback', {
@@ -273,7 +405,9 @@ document.getElementById('feedbackForm').addEventListener('submit', async (e) => 
             body: JSON.stringify({
                 house_number: currentFeedbackHouse,
                 feedback: feedback,
-                point_adjustment: pointAdjustment
+                points_override: pointsOverride,
+                bag_type: selectedFeedbackBagType,
+                reasons: reasons
             })
         });
         const data = await response.json();
@@ -284,6 +418,175 @@ document.getElementById('feedbackForm').addEventListener('submit', async (e) => 
         alert('Feedback sent successfully!');
     } catch (error) {
         alert('Failed to send feedback: ' + error.message);
+    }
+});
+
+const redeemModal = document.getElementById('redeemModal');
+const redeemOptions = document.querySelectorAll('.redeem-option');
+
+function updateRedeemState(points) {
+    const redeemPoints = document.getElementById('redeemPoints');
+    if (!redeemPoints) return;
+    const safePoints = Number.isFinite(points) ? points : 0;
+    redeemPoints.textContent = safePoints;
+    redeemOptions.forEach(option => {
+        const cost = parseInt(option.dataset.cost, 10);
+        const disabled = !Number.isFinite(cost) || safePoints < cost;
+        option.classList.toggle('disabled', disabled);
+        option.disabled = disabled;
+    });
+}
+
+function updatePointsImpact(points, redemptionSummary) {
+    const safePoints = Number.isFinite(points) ? points : 0;
+    const summary = redemptionSummary || {};
+    const treeCredits = Number.isFinite(summary.trees_planted) ? summary.trees_planted : 0;
+    const farmCredits = Number.isFinite(summary.local_credits) ? summary.local_credits : 0;
+    const co2Credits = Math.max(0, Math.round(safePoints * 0.2));
+    document.getElementById('treeCredits').textContent = treeCredits;
+    document.getElementById('farmCredits').textContent = farmCredits;
+    document.getElementById('co2Credits').textContent = co2Credits;
+}
+
+function openRedeemModal() {
+    if (!currentUser) return;
+    const currentPoints = parseInt(document.getElementById('userPoints').textContent, 10);
+    updateRedeemState(Number.isFinite(currentPoints) ? currentPoints : 0);
+    redeemModal.style.display = 'flex';
+}
+
+function closeRedeemModal() {
+    redeemModal.style.display = 'none';
+}
+
+document.getElementById('redeemBtn').addEventListener('click', openRedeemModal);
+document.getElementById('redeemClose').addEventListener('click', closeRedeemModal);
+redeemModal.addEventListener('click', (e) => {
+    if (e.target.id === 'redeemModal') {
+        closeRedeemModal();
+    }
+});
+
+redeemOptions.forEach(option => {
+    option.addEventListener('click', async () => {
+        if (option.classList.contains('disabled') || !currentUser) return;
+        const rewardId = option.dataset.rewardId;
+        const cost = parseInt(option.dataset.cost, 10);
+        const title = option.querySelector('.redeem-title')?.textContent || 'this reward';
+        const confirmed = window.confirm(`Redeem ${cost} points for ${title}?`);
+        if (!confirmed) return;
+
+        try {
+            const response = await fetch('/api/user/redeem', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    house_number: currentUser.house_number,
+                    reward_id: rewardId
+                })
+            });
+            const data = await response.json();
+            if (data.error) throw new Error(data.error);
+            currentUser.total_points = data.total_points;
+            document.getElementById('userPoints').textContent = data.total_points;
+            updateRedeemState(data.total_points);
+            updatePointsImpact(data.total_points, data.redemption_summary);
+            closeRedeemModal();
+            alert('Redemption request submitted!');
+        } catch (error) {
+            alert('Redemption failed: ' + error.message);
+        }
+    });
+});
+
+function openBagDetail(bagId) {
+    const bag = managementBagCache.get(String(bagId));
+    if (!bag) return;
+
+    const bagType = bag.bag_type || 'unknown';
+    const bagMeta = BAG_TYPE_META[bagType] || { label: 'Unknown', name: 'Bag' };
+
+    document.getElementById('bagDetailHouse').textContent = bag.house_number || '--';
+    document.getElementById('bagDetailDate').textContent = formatBagSubmittedAt(bag.submitted_at);
+
+    const bagTypePill = document.getElementById('bagDetailType');
+    bagTypePill.textContent = `${bagMeta.label} Bag`;
+    bagTypePill.className = `bag-type-pill type-${bagType}`;
+
+    const imageEl = document.getElementById('bagDetailImage');
+    const placeholderEl = document.getElementById('bagDetailPlaceholder');
+    if (bag.image_data) {
+        imageEl.src = bag.image_data;
+        imageEl.style.display = 'block';
+        placeholderEl.style.display = 'none';
+    } else {
+        imageEl.removeAttribute('src');
+        imageEl.style.display = 'none';
+        placeholderEl.style.display = 'flex';
+    }
+
+    const scoreCard = document.getElementById('mgmtScoreCard');
+    const grade = (bag.grade || 'C').toString().toLowerCase();
+    scoreCard.className = `score-card grade-${grade}`;
+    document.getElementById('mgmtScoreValue').textContent = Number.isFinite(bag.score) ? Math.round(bag.score) : '--';
+    document.getElementById('mgmtGradeBadge').textContent = (bag.grade || '--').toString().toUpperCase();
+
+    const isSorted = bag.is_properly_sorted ?? (Number.isFinite(bag.score) ? bag.score >= 75 : false);
+    const verdict = document.getElementById('mgmtVerdict');
+    if (isSorted) {
+        verdict.className = 'verdict pass';
+        document.getElementById('mgmtVerdictIcon').innerHTML = '&#10004;';
+        document.getElementById('mgmtVerdictText').textContent = 'Properly Sorted';
+    } else {
+        verdict.className = 'verdict fail';
+        document.getElementById('mgmtVerdictIcon').innerHTML = '&#10008;';
+        document.getElementById('mgmtVerdictText').textContent = 'Needs Improvement';
+    }
+
+    const itemsDetected = document.getElementById('mgmtItemsDetected');
+    const items = bag.items_detected || [];
+    itemsDetected.innerHTML = items.length > 0
+        ? items.map(item => `<span class="item-tag">${item}</span>`).join('')
+        : '<span class="item-tag muted">No items detected</span>';
+
+    const issuesCard = document.getElementById('mgmtIssuesCard');
+    const issuesList = document.getElementById('mgmtIssuesList');
+    if (bag.contamination_issues && bag.contamination_issues.length > 0) {
+        issuesCard.style.display = 'block';
+        issuesList.innerHTML = bag.contamination_issues.map(issue => `<li>${issue}</li>`).join('');
+    } else {
+        issuesCard.style.display = 'none';
+    }
+
+    document.getElementById('mgmtExplanation').textContent = bag.explanation || 'No additional analysis provided.';
+
+    const suggestionsList = document.getElementById('mgmtSuggestionsList');
+    const suggestions = bag.suggestions || [];
+    suggestionsList.innerHTML = suggestions.length > 0
+        ? suggestions.map(suggestion => `<li>${suggestion}</li>`).join('')
+        : '<li>No suggestions provided.</li>';
+
+    const confidenceNotice = document.getElementById('mgmtConfidenceNotice');
+    if (bag.confidence === 'low' || bag.confidence === 'medium') {
+        confidenceNotice.style.display = 'flex';
+        document.getElementById('mgmtConfidenceText').textContent = bag.confidence === 'low'
+            ? 'Low Confidence - Image may be unclear'
+            : 'Medium Confidence - Some items may not be visible';
+    } else {
+        confidenceNotice.style.display = 'none';
+    }
+
+    document.getElementById('bagDetailModal').style.display = 'flex';
+}
+
+function closeBagDetail() {
+    document.getElementById('bagDetailModal').style.display = 'none';
+}
+
+document.getElementById('bagDetailClose').addEventListener('click', closeBagDetail);
+document.getElementById('bagDetailModal').addEventListener('click', (e) => {
+    if (e.target.id === 'bagDetailModal') {
+        closeBagDetail();
     }
 });
 
@@ -298,12 +601,13 @@ document.querySelectorAll('.user-tabs .tab-btn').forEach(btn => {
         document.getElementById('resultsSection').style.display = 'none';
         document.getElementById('bagCheckerSection').style.display = tab === 'bag-checker' ? 'block' : 'none';
         document.getElementById('bagResultsSection').style.display = 'none';
-        document.getElementById('bagSubmitSection').style.display = tab === 'bag-submit' ? 'block' : 'none';
-        document.getElementById('submitResultsSection').style.display = 'none';
+        document.getElementById('bagQueueSection').style.display = tab === 'bag-checker' ? 'block' : 'none';
         
         document.getElementById('itemScannerSteps').style.display = tab === 'item-scanner' ? 'flex' : 'none';
         document.getElementById('bagCheckerSteps').style.display = tab === 'bag-checker' ? 'flex' : 'none';
-        document.getElementById('bagSubmitSteps').style.display = tab === 'bag-submit' ? 'flex' : 'none';
+        if (tab === 'bag-checker') {
+            renderBagQueue();
+        }
     });
 });
 
@@ -462,6 +766,7 @@ function clearBagPreview() {
     document.getElementById('bagUploadContent').style.display = 'flex';
     checkBagBtn.disabled = true;
     bagFileInput.value = '';
+    currentBagAnalysis = null;
 }
 
 checkBagBtn.addEventListener('click', async () => {
@@ -487,6 +792,11 @@ checkBagBtn.addEventListener('click', async () => {
 });
 
 function displayBagResults(data) {
+    currentBagAnalysis = {
+        ...data,
+        bag_type: selectedBagType,
+        image_data: bagImagePreview.src || ''
+    };
     document.getElementById('scoreCard').className = 'score-card grade-' + data.grade.toLowerCase();
     document.getElementById('scoreValue').textContent = data.score;
     document.getElementById('gradeBadge').textContent = data.grade;
@@ -530,110 +840,161 @@ function displayBagResults(data) {
 }
 
 document.getElementById('newBagCheckBtn').addEventListener('click', () => {
+    if (currentBagAnalysis) {
+        const bagId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        stagedBags.push({
+            id: bagId,
+            bag_type: currentBagAnalysis.bag_type,
+            score: currentBagAnalysis.score,
+            grade: currentBagAnalysis.grade,
+            is_properly_sorted: currentBagAnalysis.is_properly_sorted,
+            items_detected: currentBagAnalysis.items_detected || [],
+            contamination_issues: currentBagAnalysis.contamination_issues || [],
+            explanation: currentBagAnalysis.explanation || '',
+            suggestions: currentBagAnalysis.suggestions || [],
+            confidence: currentBagAnalysis.confidence || 'low',
+            image_data: currentBagAnalysis.image_data || ''
+        });
+        renderBagQueue();
+    }
     clearBagPreview();
     bagResultsSection.style.display = 'none';
 });
 
-const submitDropZone = document.getElementById('submitDropZone');
-const submitFileInput = document.getElementById('submitFileInput');
-const submitPreviewContainer = document.getElementById('submitPreviewContainer');
-const submitImagePreview = document.getElementById('submitImagePreview');
-const submitRemoveBtn = document.getElementById('submitRemoveBtn');
-const submitBagBtn = document.getElementById('submitBagBtn');
-const submitLoading = document.getElementById('submitLoading');
-const submitResultsSection = document.getElementById('submitResultsSection');
+const bagQueueList = document.getElementById('bagQueueList');
+const submitBatchBtn = document.getElementById('submitBatchBtn');
+const celebrationModal = document.getElementById('celebrationModal');
+const celebrationList = document.getElementById('celebrationList');
+const celebrationTotal = document.getElementById('celebrationTotal');
+const celebrationDismiss = document.getElementById('celebrationDismiss');
+const confetti = document.getElementById('confetti');
 
-document.querySelectorAll('.submit-bag-options .bag-option').forEach(btn => {
-    btn.addEventListener('click', () => {
-        document.querySelectorAll('.submit-bag-options .bag-option').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        selectedSubmitBagType = btn.dataset.bag;
+function renderBagQueue() {
+    if (!bagQueueList || !submitBatchBtn) return;
+    if (stagedBags.length === 0) {
+        bagQueueList.innerHTML = '<p class="bag-queue-empty">No bags added yet.</p>';
+        submitBatchBtn.disabled = true;
+        submitBatchBtn.textContent = 'Submit Bags (0)';
+        return;
+    }
+
+    bagQueueList.innerHTML = stagedBags.map(bag => {
+        const bagMeta = BAG_TYPE_META[bag.bag_type] || { label: 'Unknown', name: 'Bag' };
+        const scoreValue = Number.isFinite(bag.score) ? Math.round(bag.score) : '--';
+        const imageMarkup = bag.image_data
+            ? `<img src="${bag.image_data}" alt="${bagMeta.label} bag">`
+            : `<div class="bag-queue-placeholder">${bagMeta.label} Bag</div>`;
+        return `<div class="bag-queue-card" data-bag-id="${bag.id}">
+            <div class="bag-queue-thumb">${imageMarkup}</div>
+            <div class="bag-queue-info">
+                <div class="bag-queue-title">${bagMeta.label} Bag</div>
+                <div class="bag-queue-score">Score ${scoreValue}</div>
+            </div>
+            <button class="bag-queue-remove" aria-label="Remove bag">&times;</button>
+        </div>`;
+    }).join('');
+
+    submitBatchBtn.disabled = false;
+    submitBatchBtn.textContent = `Submit Bags (${stagedBags.length})`;
+
+    bagQueueList.querySelectorAll('.bag-queue-remove').forEach(btn => {
+        btn.addEventListener('click', (event) => {
+            const card = event.target.closest('.bag-queue-card');
+            if (!card) return;
+            const bagId = card.dataset.bagId;
+            stagedBags = stagedBags.filter(bag => bag.id !== bagId);
+            renderBagQueue();
+        });
     });
-});
-
-submitDropZone.addEventListener('dragover', (e) => { e.preventDefault(); submitDropZone.classList.add('dragover'); });
-submitDropZone.addEventListener('dragleave', () => { submitDropZone.classList.remove('dragover'); });
-submitDropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    submitDropZone.classList.remove('dragover');
-    if (e.dataTransfer.files.length > 0 && e.dataTransfer.files[0].type.startsWith('image/')) {
-        handleSubmitFile(e.dataTransfer.files[0]);
-    }
-});
-submitDropZone.addEventListener('click', (e) => {
-    if (e.target.closest('.file-label')) return;
-    if (e.target !== submitRemoveBtn && !submitRemoveBtn.contains(e.target) && !selectedSubmitFile) {
-        submitFileInput.click();
-    }
-});
-submitFileInput.addEventListener('change', (e) => {
-    if (e.target.files.length > 0) handleSubmitFile(e.target.files[0]);
-});
-
-function handleSubmitFile(file) {
-    selectedSubmitFile = file;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        submitImagePreview.src = e.target.result;
-        document.getElementById('submitUploadContent').style.display = 'none';
-        submitPreviewContainer.style.display = 'block';
-        submitBagBtn.disabled = false;
-    };
-    reader.readAsDataURL(file);
 }
 
-submitRemoveBtn.addEventListener('click', (e) => { e.stopPropagation(); clearSubmitPreview(); });
+submitBatchBtn.addEventListener('click', async () => {
+    if (!currentUser || stagedBags.length === 0) return;
+    submitBatchBtn.disabled = true;
+    submitBatchBtn.textContent = 'Submitting...';
 
-function clearSubmitPreview() {
-    selectedSubmitFile = null;
-    submitImagePreview.src = '';
-    submitPreviewContainer.style.display = 'none';
-    document.getElementById('submitUploadContent').style.display = 'flex';
-    submitBagBtn.disabled = true;
-    submitFileInput.value = '';
-}
-
-submitBagBtn.addEventListener('click', async () => {
-    if (!selectedSubmitFile || !currentUser) return;
-    submitLoading.classList.add('active');
-    submitBagBtn.style.display = 'none';
-    
-    const formData = new FormData();
-    formData.append('image', selectedSubmitFile);
-    formData.append('bag_type', selectedSubmitBagType);
-    formData.append('house_number', currentUser.house_number);
-    
     try {
-        const response = await fetch('/api/bag/submit', { method: 'POST', body: formData });
+        const response = await fetch('/api/bag/submit-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                house_number: currentUser.house_number,
+                bags: stagedBags
+            })
+        });
         const data = await response.json();
         if (data.error) throw new Error(data.error);
-        displaySubmitResults(data);
+        showCelebrationModal(data.submissions || []);
+        stagedBags = [];
+        renderBagQueue();
         updateUserDashboard();
     } catch (error) {
-        alert('Failed to submit bag: ' + error.message);
+        alert('Failed to submit bags: ' + error.message);
     } finally {
-        submitLoading.classList.remove('active');
-        submitBagBtn.style.display = 'block';
+        if (stagedBags.length === 0) {
+            submitBatchBtn.textContent = 'Submit Bags (0)';
+        } else {
+            submitBatchBtn.textContent = `Submit Bags (${stagedBags.length})`;
+            submitBatchBtn.disabled = false;
+        }
     }
 });
 
-function displaySubmitResults(data) {
-    document.getElementById('pointsEarned').textContent = data.points_earned;
-    document.getElementById('submitScoreCard').className = 'score-card grade-' + data.grade.toLowerCase();
-    document.getElementById('submitScoreValue').textContent = data.score;
-    document.getElementById('submitGradeBadge').textContent = data.grade;
-    document.getElementById('submitExplanationText').textContent = data.explanation;
-    
-    document.getElementById('bagSubmitSection').style.display = 'none';
-    submitResultsSection.style.display = 'block';
-    submitResultsSection.scrollIntoView({ behavior: 'smooth' });
+function showCelebrationModal(submissions) {
+    if (!celebrationModal || !celebrationList || !celebrationTotal) return;
+    const totalPoints = submissions.reduce((sum, bag) => sum + (bag.points_earned || 0), 0);
+    celebrationTotal.textContent = totalPoints;
+    celebrationList.innerHTML = submissions.map(bag => {
+        const bagMeta = BAG_TYPE_META[bag.bag_type] || { label: 'Unknown', name: 'Bag' };
+        const scoreValue = Number.isFinite(bag.score) ? Math.round(bag.score) : '--';
+        const pointsValue = bag.points_earned ?? 0;
+        return `<div class="celebration-item">
+            <div class="celebration-bag">${bagMeta.label} Bag</div>
+            <div class="celebration-meta">Score ${scoreValue}</div>
+            <div class="celebration-points">+${pointsValue} pts</div>
+        </div>`;
+    }).join('');
+    buildConfetti();
+    celebrationModal.style.display = 'flex';
 }
 
-document.getElementById('newSubmitBtn').addEventListener('click', () => {
-    clearSubmitPreview();
-    submitResultsSection.style.display = 'none';
-    document.getElementById('bagSubmitSection').style.display = 'block';
-});
+function closeCelebrationModal() {
+    if (!celebrationModal) return;
+    celebrationModal.style.display = 'none';
+    if (confetti) confetti.innerHTML = '';
+}
+
+function buildConfetti() {
+    if (!confetti) return;
+    const colors = ['#22C55E', '#2D9CDB', '#FACC15', '#F97316', '#A855F7'];
+    confetti.innerHTML = '';
+    for (let i = 0; i < 28; i++) {
+        const span = document.createElement('span');
+        const size = 6 + Math.random() * 6;
+        const left = Math.random() * 100;
+        const delay = Math.random() * 0.8;
+        const duration = 2.4 + Math.random() * 1.6;
+        span.style.width = `${size}px`;
+        span.style.height = `${size * 0.6}px`;
+        span.style.left = `${left}%`;
+        span.style.background = colors[i % colors.length];
+        span.style.animationDelay = `${delay}s`;
+        span.style.animationDuration = `${duration}s`;
+        span.style.transform = `rotate(${Math.random() * 180}deg)`;
+        confetti.appendChild(span);
+    }
+}
+
+if (celebrationDismiss) {
+    celebrationDismiss.addEventListener('click', closeCelebrationModal);
+}
+if (celebrationModal) {
+    celebrationModal.addEventListener('click', (e) => {
+        if (e.target.id === 'celebrationModal') {
+            closeCelebrationModal();
+        }
+    });
+}
 
 function formatWeight(grams) {
     return grams >= 1000 ? (grams / 1000).toFixed(1) + 'kg' : grams + 'g';

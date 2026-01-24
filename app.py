@@ -15,9 +15,44 @@ client = OpenAI(
 users_db = {}
 bag_submissions_db = []
 management_feedback_db = {}
+redemptions_db = []
 
-MANAGEMENT_ID = "123"
-MANAGEMENT_KEY = "123"
+MANAGEMENT_ID = "admin"
+MANAGEMENT_KEY = "admin"
+VALID_BAG_TYPES = {"green", "blue", "white"}
+
+REDEEM_OPTIONS = {
+    "tree": {
+        "label": "Plant a Tree",
+        "cost": 500,
+        "description": "Support local tree planting initiatives."
+    },
+    "farmers_market": {
+        "label": "Farmers Market Gift Card",
+        "cost": 750,
+        "description": "Shop local produce and support local farmers."
+    },
+    "cavendish": {
+        "label": "Cavendish Farms Voucher",
+        "cost": 1000,
+        "description": "Redeem a voucher for Canadian-made products."
+    },
+    "refill_shop": {
+        "label": "Refill Shop Gift Card",
+        "cost": 900,
+        "description": "Stock up on low-waste refills and bulk essentials."
+    },
+    "bike_tune": {
+        "label": "Bike Tune-Up Credit",
+        "cost": 650,
+        "description": "Support sustainable commuting with a local bike shop."
+    },
+    "community_garden": {
+        "label": "Community Garden Donation",
+        "cost": 400,
+        "description": "Help expand local community garden beds."
+    }
+}
 
 PICKUP_SCHEDULE = {
     "Monday": "green",
@@ -65,6 +100,16 @@ def calculate_points(score):
 def get_week_start():
     today = datetime.now()
     return today - timedelta(days=today.weekday())
+
+def get_redemption_summary(house_number):
+    redemptions = [r for r in redemptions_db if r.get("house_number") == house_number]
+    tree_count = sum(1 for r in redemptions if r.get("reward_id") == "tree")
+    local_credit_rewards = {"farmers_market", "refill_shop", "cavendish", "bike_tune"}
+    local_credits = sum(1 for r in redemptions if r.get("reward_id") in local_credit_rewards)
+    return {
+        "trees_planted": tree_count,
+        "local_credits": local_credits
+    }
 
 @app.route('/')
 def index():
@@ -129,7 +174,8 @@ def get_user_stats(house_number):
         "total_submissions": len(user_submissions),
         "recent_submissions": weekly_submissions[-5:] if weekly_submissions else [],
         "pickup_schedule": PICKUP_SCHEDULE,
-        "management_feedback": feedback[-3:] if feedback else []
+        "management_feedback": feedback[-3:] if feedback else [],
+        "redemption_summary": get_redemption_summary(house_number)
     })
 
 @app.route('/api/management/login', methods=['POST'])
@@ -150,6 +196,25 @@ def get_households():
     for house_number, user in users_db.items():
         submissions = [s for s in bag_submissions_db if s['house_number'] == house_number]
         avg_score = sum(s['score'] for s in submissions) / len(submissions) if submissions else 0
+        recent_submissions = submissions[-3:] if submissions else []
+        recent_bags = [
+            {
+                "id": s.get("id"),
+                "house_number": house_number,
+                "bag_type": s.get("bag_type", "unknown"),
+                "score": s.get("score", 0),
+                "grade": s.get("grade", "C"),
+                "is_properly_sorted": s.get("is_properly_sorted", False),
+                "items_detected": s.get("items_detected", []),
+                "contamination_issues": s.get("contamination_issues", []),
+                "explanation": s.get("explanation", ""),
+                "suggestions": s.get("suggestions", []),
+                "confidence": s.get("confidence", "low"),
+                "image_data": s.get("image_data"),
+                "submitted_at": s.get("submitted_at")
+            }
+            for s in recent_submissions
+        ]
         
         status = "ok"
         if len(submissions) == 0:
@@ -166,24 +231,70 @@ def get_households():
             "avg_score": round(avg_score, 1),
             "total_points": user.get("total_points", 0),
             "status": status,
-            "last_submission": submissions[-1]["submitted_at"] if submissions else None
+            "last_submission": submissions[-1]["submitted_at"] if submissions else None,
+            "recent_bags": list(reversed(recent_bags))
         })
     
     return jsonify(households)
 
 @app.route('/api/management/feedback', methods=['POST'])
 def submit_feedback():
-    data = request.json
+    data = request.json or {}
     house_number = data.get('house_number')
-    feedback_text = data.get('feedback', '').strip()
+    feedback_text = (data.get('feedback') or '').strip()
     point_adjustment = data.get('point_adjustment', 0)
+    try:
+        point_adjustment = int(point_adjustment)
+    except (TypeError, ValueError):
+        point_adjustment = 0
+
+    bag_type = (data.get('bag_type') or '').strip().lower()
+    if bag_type not in VALID_BAG_TYPES:
+        bag_type = None
+    reasons = data.get('reasons', [])
+    if not isinstance(reasons, list):
+        reasons = []
+    reasons = [str(reason).strip() for reason in reasons if str(reason).strip()]
+    points_override = data.get('points_override', None)
+    points_override_value = None
+    if points_override is not None and str(points_override).strip() != "":
+        try:
+            points_override_value = int(points_override)
+        except (TypeError, ValueError):
+            return jsonify({"error": "Invalid override points"}), 400
+        if points_override_value < 0:
+            return jsonify({"error": "Override points must be non-negative"}), 400
+    if not feedback_text and reasons:
+        feedback_text = "Sorting issue noted."
     
     if not house_number or house_number not in users_db:
         return jsonify({"error": "Invalid house number"}), 400
+
+    points_delta = None
+    if points_override_value is not None:
+        if bag_type is None:
+            return jsonify({"error": "Select a bag color to adjust points"}), 400
+        submissions = [
+            s for s in bag_submissions_db
+            if s['house_number'] == house_number and s.get("bag_type") == bag_type
+        ]
+        if not submissions:
+            return jsonify({"error": f"No {bag_type} bag submissions to override"}), 400
+        latest_submission = max(submissions, key=lambda s: s.get('submitted_at', ''))
+        original_points = latest_submission.get("points_earned", 0)
+        latest_submission["points_earned"] = points_override_value
+        points_delta = points_override_value - original_points
+        users_db[house_number]["total_points"] += points_delta
+    else:
+        users_db[house_number]["total_points"] += point_adjustment
     
     feedback_entry = {
         "feedback": feedback_text,
-        "point_adjustment": point_adjustment,
+        "point_adjustment": point_adjustment if points_override_value is None else 0,
+        "points_override": points_override_value,
+        "points_delta": points_delta,
+        "bag_type": bag_type,
+        "reasons": reasons,
         "submitted_at": datetime.now().isoformat()
     }
     
@@ -191,9 +302,107 @@ def submit_feedback():
         management_feedback_db[house_number] = []
     management_feedback_db[house_number].append(feedback_entry)
     
-    users_db[house_number]["total_points"] += point_adjustment
-    
     return jsonify({"success": True})
+
+@app.route('/api/user/redeem', methods=['POST'])
+def redeem_points():
+    data = request.json or {}
+    house_number = data.get('house_number')
+    reward_id = (data.get('reward_id') or '').strip()
+
+    if not house_number or house_number not in users_db:
+        return jsonify({"error": "Invalid house number"}), 400
+
+    if reward_id not in REDEEM_OPTIONS:
+        return jsonify({"error": "Invalid reward option"}), 400
+
+    reward = REDEEM_OPTIONS[reward_id]
+    current_points = users_db[house_number].get("total_points", 0)
+    if current_points < reward["cost"]:
+        return jsonify({
+            "error": "Not enough points",
+            "required_points": reward["cost"],
+            "current_points": current_points
+        }), 400
+
+    users_db[house_number]["total_points"] = current_points - reward["cost"]
+    redemption_entry = {
+        "house_number": house_number,
+        "reward_id": reward_id,
+        "reward_label": reward["label"],
+        "points_spent": reward["cost"],
+        "submitted_at": datetime.now().isoformat()
+    }
+    redemptions_db.append(redemption_entry)
+
+    return jsonify({
+        "success": True,
+        "total_points": users_db[house_number]["total_points"],
+        "redemption": redemption_entry,
+        "redemption_summary": get_redemption_summary(house_number)
+    })
+
+@app.route('/api/bag/submit-batch', methods=['POST'])
+def submit_bag_batch():
+    data = request.json or {}
+    house_number = data.get('house_number')
+    bags = data.get('bags', [])
+
+    if not house_number or house_number not in users_db:
+        return jsonify({"error": "Invalid house number. Please register first."}), 400
+
+    if not isinstance(bags, list) or not bags:
+        return jsonify({"error": "No bags provided"}), 400
+
+    submissions = []
+    total_points_awarded = 0
+
+    for bag in bags:
+        bag_type = (bag.get("bag_type") or "unknown").strip().lower()
+        if bag_type not in VALID_BAG_TYPES:
+            bag_type = "unknown"
+
+        score = bag.get("score", 0)
+        try:
+            score = int(score)
+        except (TypeError, ValueError):
+            score = 0
+        score = max(0, min(100, score))
+
+        points_earned = calculate_points(score)
+        total_points_awarded += points_earned
+
+        submission = {
+            "id": len(bag_submissions_db) + 1,
+            "house_number": house_number,
+            "bag_type": bag_type,
+            "score": score,
+            "grade": bag.get("grade", "C"),
+            "is_properly_sorted": bag.get("is_properly_sorted", score >= 75),
+            "items_detected": bag.get("items_detected", []),
+            "contamination_issues": bag.get("contamination_issues", []),
+            "explanation": bag.get("explanation", ""),
+            "suggestions": bag.get("suggestions", []),
+            "confidence": bag.get("confidence", "low"),
+            "points_earned": points_earned,
+            "image_data": bag.get("image_data"),
+            "submitted_at": datetime.now().isoformat()
+        }
+
+        bag_submissions_db.append(submission)
+        submissions.append(submission)
+
+    users_db[house_number]["total_points"] += total_points_awarded
+
+    response_submissions = [
+        {k: v for k, v in s.items() if k != "image_data"} for s in submissions
+    ]
+
+    return jsonify({
+        "success": True,
+        "submissions": response_submissions,
+        "total_points": users_db[house_number]["total_points"]
+    })
 
 @app.route('/api/bag/submit', methods=['POST'])
 def submit_bag():
@@ -213,6 +422,7 @@ def submit_bag():
     image_data = file.read()
     base64_image = base64.b64encode(image_data).decode('utf-8')
     mime_type = file.content_type or 'image/jpeg'
+    image_data_url = f"data:{mime_type};base64,{base64_image}"
     
     try:
         response = client.chat.completions.create(
@@ -293,14 +503,16 @@ Respond with ONLY valid JSON in this exact format:
             "suggestions": ai_result.get("suggestions", []),
             "confidence": ai_result.get("confidence", "low"),
             "points_earned": points_earned,
+            "image_data": image_data_url,
             "submitted_at": datetime.now().isoformat()
         }
         
         bag_submissions_db.append(submission)
         users_db[house_number]["total_points"] += points_earned
         
+        response_payload = {k: v for k, v in submission.items() if k != "image_data"}
         return jsonify({
-            **submission,
+            **response_payload,
             "total_points": users_db[house_number]["total_points"]
         })
         
